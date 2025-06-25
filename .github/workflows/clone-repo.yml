@@ -5,6 +5,10 @@ on:
   issues:
     types: [opened]
 
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   clone-repository:
     runs-on: ubuntu-latest
