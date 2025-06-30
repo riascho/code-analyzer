@@ -160,54 +160,23 @@ jobs:
             echo "❌ No cloned repository directory found"
           fi
 
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `❌ **Failed to Clone Repository**
-              
-              There was an error cloning the repository. Common issues:
-              - Repository URL is invalid or malformed
-              - Repository is private and not accessible
-              - Repository doesn't exist
-              - Network connectivity issues
-              
-              Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for more details.
-              
-              **Expected format:** Include a GitHub repository URL in your issue body, like:
-              \`\`\`
-              Repository: https://github.com/owner/repository-name
-              \`\`\``
-            });
-            
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ['clone-failed']
-            });
-
-# use claude.md for the prompt/ instructions? 
+      # use claude.md for the prompt/ instructions?
       - name: Parse analysis prompt from issue
         id: parse-prompt
         run: |
           echo "🔍 Parsing analysis prompt from issue..."
-          
+
           # Extract custom prompt from issue body (between ```prompt and ```)
           PROMPT=$(echo "${{ github.event.issue.body }}" | sed -n '/```prompt/,/```/p' | sed '1d;$d' | tr -d '\r')
-          
+
           # Use default prompt if none provided
           if [ -z "$PROMPT" ]; then
             PROMPT="Analyze this repository for code quality, security vulnerabilities, and architectural improvements. Focus on identifying potential issues, best practices violations, and provide specific recommendations for improvement."
           fi
-          
+
           echo "📝 Analysis prompt:"
           echo "$PROMPT"
-          
+
           # Save prompt to output (handle multiline)
           {
             echo "prompt<<EOF"
@@ -232,30 +201,30 @@ jobs:
               owner: '${{ steps.parse-repo.outputs.owner }}',
               name: '${{ steps.parse-repo.outputs.repo_name }}'
             };
-            
+
             const analysisResults = `${{ steps.claude-analysis.outputs.response }}`;
-            
+
             const commentBody = `## 🤖 Claude Code Analysis Results
-            
+
             **Repository:** ${repoInfo.url}
             **Analysis Date:** ${new Date().toISOString()}
             **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            
+
             **Prompt Used:**
             \`\`\`
             ${{ steps.parse-prompt.outputs.prompt }}
             \`\`\`
-            
+
             ---
-            
+
             ### 📊 Analysis Results:
-            
+
             ${analysisResults}
-            
+
             ---
-            
+
             *Analysis completed using Claude Code Action*`;
-            
+
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -290,7 +259,7 @@ jobs:
               
               **Get your API key:** Visit https://console.anthropic.com/ to create an API key if you don't have one.`
             });
-            
+
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
