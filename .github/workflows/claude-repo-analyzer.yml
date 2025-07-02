@@ -11,40 +11,45 @@ permissions:
 
 jobs:
   restrict-author:
-      runs-on: ubuntu-latest
-      steps:
-        - name: Check issue author
-          uses: actions/github-script@v7
-          with:
-            # github-token: ${{ secrets.GITHUB_TOKEN }}
-            script: |
-              const allowedUsers = [
-                "riascho"
-              ];
+    runs-on: ubuntu-latest
+    outputs:
+      should_continue: ${{ steps.set-output.outputs.continue }}
+    steps:
+      - name: Check issue author
+        id: set-output
+        uses: actions/github-script@v7
+        with:
+          # github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const allowedUsers = ['riascho'];
+            const author = context.payload.issue.user.login;
 
-              const issueAuthor = context.payload.issue.user.login;
+            const isAllowed = allowedUsers.includes(author);
 
-              if (!allowedUsers.includes(issueAuthor)) {
-                await github.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: `👋 Nice try, @${issueAuthor}.`
-                });
+            if (!isAllowed) {
+              await github.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `Sorry @${author}, you are not authorized to raise issues in this repository.`
+              });
 
-                await github.issues.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  state: "closed"
-                });
-              }
+              await github.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: 'closed'
+              });
+            }
+
+            return isAllowed ? 'true' : 'false';
 
   setup-and-analyze:
     runs-on: ubuntu-latest
     # Only runs if issue contains Repository: URL and @claude mention
 
     if: |
+      needs.author-check.outputs.should_continue == 'true' &&
       (github.event_name == 'issues' && 
        contains(github.event.issue.body, 'Repository:') && 
        contains(github.event.issue.body, '@claude')) ||
@@ -195,21 +200,21 @@ jobs:
             echo "❌ No cloned repository directory found"
           fi
 
-            - name: Copy cloned repository to workspace (for issues only)
-        if: github.event_name == 'issues'
+      - name: Copy cloned repository to workspace
+
         run: |
           echo "📁 Setting up workspace for Claude Code analysis..."
-          
+
           # Remove .git directory to avoid conflicts
           rm -rf ./external-repo/.git
-          
+
           # Copy all files to current workspace (Claude Code Action works on current repo)
           cp -r ./external-repo/* . 2>/dev/null || echo "No files to copy (hidden files may exist)"
           cp -r ./external-repo/.* . 2>/dev/null || echo "No hidden files to copy"
-          
+
           # Clean up original clone
           rm -rf ./external-repo
-          
+
           echo "✅ External repository files copied to workspace"
           echo "📋 Current workspace contents:"
           ls -la
@@ -248,7 +253,7 @@ jobs:
               
               Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed error information.`
             });
-            
+
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
