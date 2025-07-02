@@ -220,7 +220,7 @@ jobs:
           ls -la
 
       - name: Run Claude Code Analysis
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@vbeta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
