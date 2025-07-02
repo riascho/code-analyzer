@@ -52,7 +52,7 @@ jobs:
       needs.author-check.outputs.should_continue == 'true' &&
       (github.event_name == 'issues' && 
        contains(github.event.issue.body, 'Repository:') && 
-       contains(github.event.issue.body, '@claude')) ||
+       contains(github.event.issue.body, '@claude'))
 
     steps:
       - name: Checkout host repository
