@@ -2,17 +2,52 @@ name: Run Code Analysis on Repository from Issue
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited]
 
 permissions:
   issues: write
-  contents: read
+  contents: write
+  id-token: write
 
 jobs:
-  run-code-analysis-on-repository:
+  restrict-author:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Check issue author
+          uses: actions/github-script@v7
+          with:
+            # github-token: ${{ secrets.GITHUB_TOKEN }}
+            script: |
+              const allowedUsers = [
+                "riascho"
+              ];
+
+              const issueAuthor = context.payload.issue.user.login;
+
+              if (!allowedUsers.includes(issueAuthor)) {
+                await github.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `👋 Nice try, @${issueAuthor}.`
+                });
+
+                await github.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  state: "closed"
+                });
+              }
+
+  setup-and-analyze:
     runs-on: ubuntu-latest
-    # Only run if issue has the 'clone-repo' label or contains specific keywords
-    if: contains(github.event.issue.labels.*.name, 'clone-repo') || contains(github.event.issue.body, 'Repository:')
+    # Only runs if issue contains Repository: URL and @claude mention
+
+    if: |
+      (github.event_name == 'issues' && 
+       contains(github.event.issue.body, 'Repository:') && 
+       contains(github.event.issue.body, '@claude')) ||
 
     steps:
       - name: Checkout host repository
@@ -160,80 +195,34 @@ jobs:
             echo "❌ No cloned repository directory found"
           fi
 
-      # use claude.md for the prompt/ instructions?
-      - name: Parse analysis prompt from issue
-        id: parse-prompt
+            - name: Copy cloned repository to workspace (for issues only)
+        if: github.event_name == 'issues'
         run: |
-          echo "🔍 Parsing analysis prompt from issue..."
-
-          # Extract custom prompt from issue body (between ```prompt and ```)
-          PROMPT=$(echo "${{ github.event.issue.body }}" | sed -n '/```prompt/,/```/p' | sed '1d;$d' | tr -d '\r')
-
-          # Use default prompt if none provided
-          if [ -z "$PROMPT" ]; then
-            PROMPT="Analyze this repository for code quality, security vulnerabilities, and architectural improvements. Focus on identifying potential issues, best practices violations, and provide specific recommendations for improvement."
-          fi
-
-          echo "📝 Analysis prompt:"
-          echo "$PROMPT"
-
-          # Save prompt to output (handle multiline)
-          {
-            echo "prompt<<EOF"
-            echo "$PROMPT"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          echo "📁 Setting up workspace for Claude Code analysis..."
+          
+          # Remove .git directory to avoid conflicts
+          rm -rf ./external-repo/.git
+          
+          # Copy all files to current workspace (Claude Code Action works on current repo)
+          cp -r ./external-repo/* . 2>/dev/null || echo "No files to copy (hidden files may exist)"
+          cp -r ./external-repo/.* . 2>/dev/null || echo "No hidden files to copy"
+          
+          # Clean up original clone
+          rm -rf ./external-repo
+          
+          echo "✅ External repository files copied to workspace"
+          echo "📋 Current workspace contents:"
+          ls -la
 
       - name: Run Claude Code Analysis
-        id: claude-analysis
-        uses: anthropics/claude-code-action@beta
+        uses: anthropics/claude-code-action@v1
         with:
-          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          working-directory: ./cloned-repo
-          prompt: ${{ steps.parse-prompt.outputs.prompt }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
+          trigger_phrase: "@claude"
 
-      - name: Post analysis results to issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const repoInfo = {
-              url: '${{ steps.parse-repo.outputs.repo_url }}',
-              owner: '${{ steps.parse-repo.outputs.owner }}',
-              name: '${{ steps.parse-repo.outputs.repo_name }}'
-            };
-
-            const analysisResults = `${{ steps.claude-analysis.outputs.response }}`;
-
-            const commentBody = `## 🤖 Claude Code Analysis Results
-
-            **Repository:** ${repoInfo.url}
-            **Analysis Date:** ${new Date().toISOString()}
-            **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
-            **Prompt Used:**
-            \`\`\`
-            ${{ steps.parse-prompt.outputs.prompt }}
-            \`\`\`
-
-            ---
-
-            ### 📊 Analysis Results:
-
-            ${analysisResults}
-
-            ---
-
-            *Analysis completed using Claude Code Action*`;
-
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
-
-      - name: Handle Claude Code analysis failure
-        if: failure() && steps.claude-analysis.conclusion == 'failure'
+      - name: Handle analysis failure
+        if: failure()
         uses: actions/github-script@v7
         with:
           script: |
@@ -241,39 +230,37 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `❌ **Claude Code Analysis Failed**
+              body: `❌ **Repository Analysis Failed**
               
-              The repository was cloned successfully, but the Claude Code analysis failed.
-              
-              **Common issues:**
+              There was an error analyzing the repository. Common issues:
+              - Repository URL is invalid or malformed  
+              - Repository is private and not accessible
+              - Repository is too large for analysis
               - Missing or invalid ANTHROPIC_API_KEY secret
-              - Repository too large for analysis
-              - Analysis prompt caused an error
-              - API rate limits exceeded
+              - Analysis request format incorrect
               
-              **To fix:**
-              1. Ensure you've added your Anthropic API key to repository secrets as \`ANTHROPIC_API_KEY\`
-              2. Check if the repository is too large (try with a smaller repo first)
-              3. Verify your API key has sufficient credits
-              4. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed error information
+              **Expected format:**
+              \`\`\`
+              Repository: https://github.com/owner/repository-name
               
-              **Get your API key:** Visit https://console.anthropic.com/ to create an API key if you don't have one.`
+              @claude Please analyze this repository for code quality issues.
+              \`\`\`
+              
+              Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed error information.`
             });
-
+            
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              labels: ['claude-analysis-failed']
+              labels: ['analysis-failed']
             });
 
-      - name: Add analysis completed label
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ['claude-analyzed']
-            });
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: setup-and-analyze
+    if: always() && github.event_name == 'issues'
+    steps:
+      - name: Cleanup workspace
+        run: |
+          echo "🧹 Analysis completed - workspace will be automatically cleaned up"
