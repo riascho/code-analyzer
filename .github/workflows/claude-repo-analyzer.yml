@@ -66,26 +66,7 @@ jobs:
             echo "❌ Failed to clone repository"
             exit 1
           fi
-
-          # Change to cloned repo directory and get some info
-          cd ./cloned-repo
-
-          echo "📊 Repository Information:"
-          echo "- Repository: ${{ steps.parse-repo.outputs.repo_path }}"
-          echo "- Branch: $(git branch --show-current)"
-          echo "- Last commit: $(git log -1 --format='%h - %s (%an, %ar)')"
-          echo "- Total files: $(find . -type f | wc -l)"
-          echo "- Directory size: $(du -sh . | cut -f1)"
-
-          # List some basic file types
-          echo ""
-          echo "📁 File breakdown:"
-          for ext in py js ts java go rs cpp c php rb; do
-            count=$(find . -name "*.$ext" | wc -l)
-            if [ $count -gt 0 ]; then
-              echo "- .$ext files: $count"
-            fi
-          done
+          ls -la
 
       - name: Clone node starter repository
         id: clone-node-starter-repo
@@ -99,6 +80,7 @@ jobs:
             echo "❌ Failed to clone repository"
             exit 1
           fi
+          ls -la
 
       - name: Handle clone failure
         if: failure()
@@ -132,55 +114,45 @@ jobs:
               labels: ['clone-failed']
             });
 
-      - name: List cloned repository contents (for debugging)
-        if: always()
-        run: |
-          if [ -d "./cloned-repo" ]; then
-            echo "📋 Repository structure (top level):"
-            ls -la ./cloned-repo/ || echo "Could not list directory contents"
-          else
-            echo "❌ No cloned repository directory found"
-          fi
+      # - name: Setup workspace for Claude Code analysis
+      #   run: |
+      #     echo "📁 Setting up workspace for Claude Code analysis..."
 
-      - name: Setup workspace for Claude Code analysis
-        run: |
-          echo "📁 Setting up workspace for Claude Code analysis..."
+      #     # Create a clean workspace structure for Claude to analyze both repositories
+      #     mkdir -p ./workspace
 
-          # Create a clean workspace structure for Claude to analyze both repositories
-          mkdir -p ./workspace
+      #     # Copy target repository (preserve directory structure)
+      #     if [ -d "./cloned-repo" ]; then
+      #       echo "📂 Copying target repository to workspace/target-repo/"
+      #       cp -r ./cloned-repo ./workspace/target-repo
+      #       rm -rf ./workspace/target-repo/.git
+      #     else
+      #       echo "❌ Target repository not found at ./cloned-repo"
+      #       exit 1
+      #     fi
 
-          # Copy target repository (preserve directory structure)
-          if [ -d "./cloned-repo" ]; then
-            echo "📂 Copying target repository to workspace/target-repo/"
-            cp -r ./cloned-repo ./workspace/target-repo
-            rm -rf ./workspace/target-repo/.git
-          else
-            echo "❌ Target repository not found at ./cloned-repo"
-            exit 1
-          fi
+      #     # Copy n8n starter repository (preserve directory structure)
+      #     if [ -d "./n8n-nodes-starter" ]; then
+      #       echo "📂 Copying n8n-nodes-starter to workspace/n8n-nodes-starter/"
+      #       cp -r ./n8n-nodes-starter ./workspace/n8n-nodes-starter
+      #       rm -rf ./workspace/n8n-nodes-starter/.git
+      #     else
+      #       echo "❌ n8n-nodes-starter repository not found"
+      #       exit 1
+      #     fi
 
-          # Copy n8n starter repository (preserve directory structure)  
-          if [ -d "./n8n-nodes-starter" ]; then
-            echo "📂 Copying n8n-nodes-starter to workspace/n8n-nodes-starter/"
-            cp -r ./n8n-nodes-starter ./workspace/n8n-nodes-starter
-            rm -rf ./workspace/n8n-nodes-starter/.git
-          else
-            echo "❌ n8n-nodes-starter repository not found"
-            exit 1
-          fi
+      #     # Move into workspace directory for Claude Code execution
+      #     cd ./workspace
 
-          # Move into workspace directory for Claude Code execution
-          cd ./workspace
-
-          echo "✅ Workspace setup complete"
-          echo "📋 Workspace structure:"
-          ls -la
-          echo ""
-          echo "📂 Target repository contents:"
-          ls -la target-repo/
-          echo ""
-          echo "📂 n8n-nodes-starter contents:"
-          ls -la n8n-nodes-starter/
+      #     echo "✅ Workspace setup complete"
+      #     echo "📋 Workspace structure:"
+      #     ls -la
+      #     echo ""
+      #     echo "📂 Target repository contents:"
+      #     ls -la target-repo/
+      #     echo ""
+      #     echo "📂 n8n-nodes-starter contents:"
+      #     ls -la n8n-nodes-starter/
 
       - name: Run Claude Code Analysis
         uses: anthropics/claude-code-action@beta
@@ -188,8 +160,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
           trigger_phrase: "@claude"
-          allowed_tools: "bash"
-          working_directory: "./workspace"
+          timeout_minutes: 8
 
       - name: Add success label and context
         if: success()
