@@ -12,7 +12,12 @@ assignees: ""
 
 ## Analysis Request
 
-@claude Please perform comprehensive N8N Node security and compliance analysis with the following requirements:
+@claude Please perform comprehensive N8N Node security and compliance analysis. Both repositories have been provided locally:
+
+- directory `./cloned-repo` contains the target repository to be analyzed
+- directory `n8n-nodes-starter/` to be used as the baseline repository to compare against
+
+Consider the following requirements for your analysis:
 
 ### 🔒 Security & Malicious Code Detection
 
