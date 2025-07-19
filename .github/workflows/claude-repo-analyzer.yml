@@ -177,10 +177,10 @@ jobs:
           ls -la
           echo ""
           echo "📂 Target repository contents:"
-          ls -la target-repo/ | head -10
+          ls -la target-repo/
           echo ""
           echo "📂 n8n-nodes-starter contents:"
-          ls -la n8n-nodes-starter/ | head -10
+          ls -la n8n-nodes-starter/
 
       - name: Run Claude Code Analysis
         uses: anthropics/claude-code-action@beta
@@ -188,10 +188,6 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
           trigger_phrase: "@claude"
-          working_directory: "./workspace"
-        env:
-          REPO_URL: ${{ steps.parse-repo.outputs.repo_url }}
-          REPO_NAME: ${{ steps.parse-repo.outputs.repo_name }}
 
       - name: Add success label and context
         if: success()
