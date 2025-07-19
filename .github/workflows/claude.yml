@@ -1,0 +1,69 @@
+name: Claude Code
+
+on:
+  issues:
+    types: [assigned]
+    # should only run when assigned to claude
+
+jobs:
+  claude-code-action:
+    if: |
+      github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && github.event.issue.user.login == 'riascho' && github.event.issue.assignee.login == 'claude'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Analysis
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Or use OAuth token instead:
+          # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
+          trigger_phrase: "@claude"
+          timeout_minutes: "8"
+          # Optional: Restrict network access to specific domains only
+          # experimental_allowed_domains: |
+          #   .anthropic.com
+          #   .github.com
+          #   api.github.com
+          #   .githubusercontent.com
+          #   bun.sh
+          #   registry.npmjs.org
+          #   .blob.core.windows.net
+
+          # direct_prompt: |
+          #   Analyze the code in this repository for quality issues, security vulnerabilities, and best practices.
+          #   Provide a detailed report with suggestions for improvement.
+
+      - name: Add success label and context
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Add success label
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['code-analyzed']
+            });
+
+      - name: Handle analysis failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['analysis-failed']
+            });

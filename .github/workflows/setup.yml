@@ -1,0 +1,124 @@
+name: Setup Repositories
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: write
+  id-token: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issues' && github.event.issue.user.login == 'riascho' && contains(github.event.issue.body, 'Repository')
+    steps:
+      - name: Checkout host repository
+        uses: actions/checkout@v4
+
+      - name: Parse repository URL from issue
+        id: parse-repo
+        run: |
+          echo "🔍 Parsing issue body for repository URL..."
+
+          # Extract repository URL from issue body
+          # Look for patterns like "Repository: https://github.com/..." or just the URL
+          REPO_URL=$(echo "${{ github.event.issue.body }}" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+' | head -1)
+
+          if [ -z "$REPO_URL" ]; then
+            echo "❌ No valid GitHub repository URL found in issue body"
+            echo "Issue body content:"
+            echo "${{ github.event.issue.body }}"
+            exit 1
+          fi
+
+          # Extract owner and repo name for later use
+          REPO_PATH=$(echo "$REPO_URL" | sed 's|https://github\.com/||')
+          OWNER=$(echo "$REPO_PATH" | cut -d'/' -f1)
+          REPO_NAME=$(echo "$REPO_PATH" | cut -d'/' -f2)
+
+          echo "✅ Found repository URL: $REPO_URL"
+          echo "📂 Owner: $OWNER"
+          echo "📁 Repository: $REPO_NAME"
+
+          # Export variables for next steps
+          echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
+          echo "repo_path=$REPO_PATH" >> $GITHUB_OUTPUT
+          echo "owner=$OWNER" >> $GITHUB_OUTPUT
+          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+
+      - name: Clone target repository
+        id: clone-target-repo
+        run: |
+          echo "🔄 Cloning repository: ${{ steps.parse-repo.outputs.repo_url }}"
+
+          # Clone the repository
+          if git clone "${{ steps.parse-repo.outputs.repo_url }}" ./cloned-repo; then
+            echo "✅ Repository cloned successfully"
+          else
+            echo "❌ Failed to clone repository"
+            exit 1
+          fi
+          ls -la
+
+      - name: Clone node starter repository
+        id: clone-node-starter-repo
+        run: |
+          echo "🔄 Cloning Node Starter repository"
+
+          # Clone the repository
+          if git clone https://github.com/n8n-io/n8n-nodes-starter.git ./n8n-nodes-starter; then
+            echo "✅ Repository cloned successfully"
+          else
+            echo "❌ Failed to clone repository"
+            exit 1
+          fi
+          ls -la
+
+      - name: Handle clone failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Failed to Clone Repository**
+              
+              There was an error cloning the repository. Common issues:
+              - Repository URL is invalid or malformed
+              - Repository is private and not accessible
+              - Repository doesn't exist
+              - Network connectivity issues
+              
+              Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for more details.
+              
+              **Expected format:** Include a GitHub repository URL in your issue body, like:
+              \`\`\`
+              Repository: https://github.com/owner/repository-name
+              \`\`\``
+            });
+
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['clone-failed']
+            });
+
+      - name: Assign Claude for analysis
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addAssignees({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              assignees: ['claude']
+            });
+
+            console.log('Assigned Claude for code analysis');
