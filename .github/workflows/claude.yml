@@ -2,13 +2,13 @@ name: Claude Code
 
 on:
   issues:
-    types: [assigned]
+    types: [edited]
     # should only run when assigned to claude
 
 jobs:
   claude-code-action:
     if: |
-      github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && github.event.issue.user.login == 'riascho' && github.event.issue.assignee.login == 'claude'
+      github.event_name == 'issues' && contains(github.event.issue.labels, '@claude') && github.event.issue.user.login == 'riascho'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Run Analysis
         uses: anthropics/claude-code-action@beta
@@ -48,7 +46,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Add success label
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
