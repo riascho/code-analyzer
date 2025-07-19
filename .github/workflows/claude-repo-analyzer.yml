@@ -54,8 +54,135 @@ jobs:
           echo "owner=$OWNER" >> $GITHUB_OUTPUT
           echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
 
+      - name: Parse and validate Claude prompt
+        id: parse-prompt
+        run: |
+          echo "🔍 Parsing and validating Claude prompt..."
+          
+          # Extract the issue body
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          
+          # Check for @claude mention
+          if ! echo "$ISSUE_BODY" | grep -q "@claude"; then
+            echo "❌ No @claude mention found in issue body"
+            exit 1
+          fi
+          
+          # Extract the prompt section after @claude
+          CLAUDE_PROMPT=$(echo "$ISSUE_BODY" | sed -n '/@claude/,$p' | tail -n +1)
+          
+          # Determine analysis type based on prompt content
+          ANALYSIS_TYPE="general"
+          if echo "$CLAUDE_PROMPT" | grep -qi "n8n\|node submission\|node standard"; then
+            ANALYSIS_TYPE="n8n-node"
+          elif echo "$CLAUDE_PROMPT" | grep -qi "security\|vulnerability\|malicious"; then
+            ANALYSIS_TYPE="security"
+          elif echo "$CLAUDE_PROMPT" | grep -qi "performance\|optimization\|bottleneck"; then
+            ANALYSIS_TYPE="performance"
+          fi
+          
+          # Validate prompt structure based on type
+          PROMPT_VALID="true"
+          VALIDATION_MESSAGE=""
+          
+          if [ "$ANALYSIS_TYPE" = "n8n-node" ]; then
+            # Check for required n8n analysis elements
+            if ! echo "$CLAUDE_PROMPT" | grep -qi "obfuscated\|eval\|process\|require\|import"; then
+              PROMPT_VALID="false"
+              VALIDATION_MESSAGE="N8N analysis prompt missing required security checks"
+            fi
+          fi
+          
+          # Check for minimum prompt length (should have some analysis instructions)
+          PROMPT_LENGTH=$(echo "$CLAUDE_PROMPT" | wc -c)
+          if [ "$PROMPT_LENGTH" -lt 50 ]; then
+            PROMPT_VALID="false"
+            VALIDATION_MESSAGE="Prompt too short - please provide specific analysis instructions"
+          fi
+          
+          # Export results
+          echo "analysis_type=$ANALYSIS_TYPE" >> $GITHUB_OUTPUT
+          echo "prompt_valid=$PROMPT_VALID" >> $GITHUB_OUTPUT
+          echo "validation_message=$VALIDATION_MESSAGE" >> $GITHUB_OUTPUT
+          echo "claude_prompt<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLAUDE_PROMPT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "✅ Analysis type detected: $ANALYSIS_TYPE"
+          echo "✅ Prompt validation: $PROMPT_VALID"
+          if [ "$PROMPT_VALID" = "false" ]; then
+            echo "❌ Validation issue: $VALIDATION_MESSAGE"
+          fi
+
+      - name: Handle invalid prompt
+        if: steps.parse-prompt.outputs.prompt_valid == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const validationMessage = '${{ steps.parse-prompt.outputs.validation_message }}';
+            const analysisType = '${{ steps.parse-prompt.outputs.analysis_type }}';
+            
+            let examplePrompt = '';
+            if (analysisType === 'n8n-node') {
+              examplePrompt = `
+            **Example for N8N Node Analysis:**
+            \`\`\`
+            Repository: https://github.com/owner/n8n-node-example
+            
+            @claude Please perform the below Code Analysis:
+            
+            1. Check for presence of obfuscated code or statements that could hide malicious behaviour
+            2. Detect any general deviations from current node standard
+            3. Make sure all UI elements are in English
+            4. Check for usage of deprecated node options
+            5. Check if there is any indicator of a credential being exported
+            6. Look for unexpected network requests or API calls
+            
+            Output only violations with reference to code lines and keep your output below 2000 characters, give a result of \`passed\` or \`failed\`
+            \`\`\``;
+            } else {
+              examplePrompt = `
+            **Example for General Analysis:**
+            \`\`\`
+            Repository: https://github.com/owner/repo-name
+            
+            @claude Please analyze this repository focusing on:
+            - Code quality and maintainability
+            - Security vulnerabilities
+            - Performance issues
+            - Best practices compliance
+            \`\`\``;
+            }
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Invalid Prompt Format**
+              
+              **Issue:** ${validationMessage}
+              **Detected Type:** ${analysisType}
+              
+              Please update your issue with a properly formatted prompt:
+              ${examplePrompt}
+              
+              **Requirements:**
+              - Include specific analysis instructions
+              - Use clear, detailed requirements
+              - For N8N nodes, include security and standards checks
+              `
+            });
+            
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['invalid-prompt']
+            });
+
       - name: Clone target repository
-        id: clone-repo
+        id: clone-target-repo
+        if: steps.parse-prompt.outputs.prompt_valid == 'true'
         run: |
           echo "🔄 Cloning repository: ${{ steps.parse-repo.outputs.repo_url }}"
 
@@ -87,30 +214,39 @@ jobs:
             fi
           done
 
-      - name: Comment success on issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const repoInfo = {
-              url: '${{ steps.parse-repo.outputs.repo_url }}',
-              owner: '${{ steps.parse-repo.outputs.owner }}',
-              name: '${{ steps.parse-repo.outputs.repo_name }}'
-            };
+      - name: Clone node starter repository
+        id: clone-node-starter-repo
+        if: steps.parse-prompt.outputs.prompt_valid == 'true' && steps.parse-prompt.outputs.analysis_type == 'n8n-node'
+        run: |
+          echo "🔄 Cloning Node Starter repository"
 
-            const commentBody = `## ✅ Repository Cloned Successfully
+          # Clone the repository
+          if git clone https://github.com/n8n-io/n8n-nodes-starter.git ./n8n-nodes-starter; then
+            echo "✅ Repository cloned successfully"
+          else
+            echo "❌ Failed to clone repository"
+            exit 1
+          fi
 
-            **Repository:** ${repoInfo.url}
-            **Cloned at:** ${new Date().toISOString()}
-            **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          # Change to cloned repo directory and get some info
+          cd ./n8n-nodes-starter
 
-            The repository has been successfully cloned and is ready for analysis. Check the workflow logs for detailed repository information.`;
+          echo "📊 Repository Information:"
+          echo "- Repository: ${{ steps.parse-repo.outputs.repo_path }}"
+          echo "- Branch: $(git branch --show-current)"
+          echo "- Last commit: $(git log -1 --format='%h - %s (%an, %ar)')"
+          echo "- Total files: $(find . -type f | wc -l)"
+          echo "- Directory size: $(du -sh . | cut -f1)"
 
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
+          # List some basic file types
+          echo ""
+          echo "📁 File breakdown:"
+          for ext in py js ts java go rs cpp c php rb; do
+            count=$(find . -name "*.$ext" | wc -l)
+            if [ $count -gt 0 ]; then
+              echo "- .$ext files: $count"
+            fi
+          done
 
       - name: Handle clone failure
         if: failure()
@@ -155,7 +291,7 @@ jobs:
           fi
 
       - name: Copy cloned repository to workspace
-
+        if: steps.parse-prompt.outputs.prompt_valid == 'true'
         run: |
           echo "📁 Setting up workspace for Claude Code analysis..."
 
@@ -174,21 +310,47 @@ jobs:
           ls -la
 
       - name: Run Claude Code Analysis
+        if: steps.parse-prompt.outputs.prompt_valid == 'true'
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
           trigger_phrase: "@claude"
+        env:
+          ANALYSIS_TYPE: ${{ steps.parse-prompt.outputs.analysis_type }}
+          CLAUDE_PROMPT: ${{ steps.parse-prompt.outputs.claude_prompt }}
+          REPO_URL: ${{ steps.parse-repo.outputs.repo_url }}
+          REPO_NAME: ${{ steps.parse-repo.outputs.repo_name }}
 
-      - name: Add success label
+      - name: Add success label and context
+        if: steps.parse-prompt.outputs.prompt_valid == 'true'
         uses: actions/github-script@v7
         with:
           script: |
+            const analysisType = '${{ steps.parse-prompt.outputs.analysis_type }}';
+            const repoUrl = '${{ steps.parse-repo.outputs.repo_url }}';
+            
+            // Add success label
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              labels: ['code-analyzed']
+              labels: ['code-analyzed', `analysis-type-${analysisType}`]
+            });
+            
+            // Add context comment
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ **Analysis Complete**
+              
+              **Repository:** ${repoUrl}
+              **Analysis Type:** ${analysisType}
+              **Completed:** ${new Date().toISOString()}
+              **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              
+              The repository analysis has been completed. Check the comments above for the detailed analysis results.`
             });
 
       - name: Handle analysis failure
