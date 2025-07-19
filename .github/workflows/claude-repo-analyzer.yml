@@ -142,23 +142,45 @@ jobs:
             echo "❌ No cloned repository directory found"
           fi
 
-      - name: Copy cloned repository to workspace
+      - name: Setup workspace for Claude Code analysis
         run: |
           echo "📁 Setting up workspace for Claude Code analysis..."
 
-          # Remove .git directory to avoid conflicts
-          rm -rf ./external-repo/.git
+          # Create a clean workspace structure for Claude to analyze both repositories
+          mkdir -p ./workspace
 
-          # Copy all files to current workspace (Claude Code Action works on current repo)
-          cp -r ./external-repo/* . 2>/dev/null || echo "No files to copy (hidden files may exist)"
-          cp -r ./external-repo/.* . 2>/dev/null || echo "No hidden files to copy"
+          # Copy target repository (preserve directory structure)
+          if [ -d "./cloned-repo" ]; then
+            echo "📂 Copying target repository to workspace/target-repo/"
+            cp -r ./cloned-repo ./workspace/target-repo
+            rm -rf ./workspace/target-repo/.git
+          else
+            echo "❌ Target repository not found at ./cloned-repo"
+            exit 1
+          fi
 
-          # Clean up original clone
-          rm -rf ./external-repo
+          # Copy n8n starter repository (preserve directory structure)  
+          if [ -d "./n8n-nodes-starter" ]; then
+            echo "📂 Copying n8n-nodes-starter to workspace/n8n-nodes-starter/"
+            cp -r ./n8n-nodes-starter ./workspace/n8n-nodes-starter
+            rm -rf ./workspace/n8n-nodes-starter/.git
+          else
+            echo "❌ n8n-nodes-starter repository not found"
+            exit 1
+          fi
 
-          echo "✅ External repository files copied to workspace"
-          echo "📋 Current workspace contents:"
+          # Move into workspace directory for Claude Code execution
+          cd ./workspace
+
+          echo "✅ Workspace setup complete"
+          echo "📋 Workspace structure:"
           ls -la
+          echo ""
+          echo "📂 Target repository contents:"
+          ls -la target-repo/ | head -10
+          echo ""
+          echo "📂 n8n-nodes-starter contents:"
+          ls -la n8n-nodes-starter/ | head -10
 
       - name: Run Claude Code Analysis
         uses: anthropics/claude-code-action@beta
@@ -166,16 +188,16 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
           trigger_phrase: "@claude"
+          working_directory: "./workspace"
         env:
           REPO_URL: ${{ steps.parse-repo.outputs.repo_url }}
           REPO_NAME: ${{ steps.parse-repo.outputs.repo_name }}
 
       - name: Add success label and context
-        if: steps.parse-prompt.outputs.prompt_valid == 'true'
+        if: success()
         uses: actions/github-script@v7
         with:
           script: |
-            const analysisType = '${{ steps.parse-prompt.outputs.analysis_type }}';
             const repoUrl = '${{ steps.parse-repo.outputs.repo_url }}';
 
             // Add success label
@@ -183,7 +205,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              labels: ['code-analyzed', `analysis-type-${analysisType}`]
+              labels: ['code-analyzed']
             });
 
             // Add context comment
@@ -194,7 +216,6 @@ jobs:
               body: `✅ **Analysis Complete**
               
               **Repository:** ${repoUrl}
-              **Analysis Type:** ${analysisType}
               **Completed:** ${new Date().toISOString()}
               **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
               
