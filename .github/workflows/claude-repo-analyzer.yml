@@ -112,17 +112,6 @@ jobs:
               body: commentBody
             });
 
-      - name: Add success label
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ['repo-cloned']
-            });
-
       - name: Handle clone failure
         if: failure()
         uses: actions/github-script@v7
@@ -191,6 +180,17 @@ jobs:
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
           trigger_phrase: "@claude"
 
+      - name: Add success label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['code-analyzed']
+            });
+
       - name: Handle analysis failure
         if: failure()
         uses: actions/github-script@v7
@@ -234,3 +234,30 @@ jobs:
       - name: Cleanup workspace
         run: |
           echo "🧹 Analysis completed - workspace will be automatically cleaned up"
+
+      - name: Close issue if analysis succeeded
+        if: contains(needs.setup-and-analyze.result, 'success')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Check if the issue has the 'code-analyzed' label
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+
+            const hasCodeAnalyzedLabel = labels.some(label => label.name === 'code-analyzed');
+
+            if (hasCodeAnalyzedLabel) {
+              await github.rest.issues.update({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'closed'
+              });
+              
+              console.log('Issue closed automatically after successful analysis');
+            } else {
+              console.log('Issue not closed - code-analyzed label not found');
+            }
