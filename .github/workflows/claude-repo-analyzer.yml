@@ -188,6 +188,8 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }} // GitHub token for Claude to operate with. Only include this if you're connecting a custom GitHub app of your own!
           trigger_phrase: "@claude"
+          allowed_tools: "bash"
+          working_directory: "./workspace"
 
       - name: Add success label and context
         if: success()
